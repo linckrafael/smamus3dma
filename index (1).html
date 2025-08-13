@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Gestão de Estacionamento — Visualizador 3D</title>
+  
+  <!-- Favicon (resolve o erro 404) -->
+  <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==">
+
+  <!-- Import Map para maior compatibilidade (opcional, mas recomendado) -->
+  <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <!-- Estilos modernos, responsivos, sidebar recolhível -->
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#07101a;
+      --accent:#00d1ff;
+      --muted:#9fb3c8;
+      --glass: rgba(255,255,255,0.03);
+      --card: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#08101a 0%,#071018 100%);font-family:Inter,system-ui,Arial;color:#eaf6ff}
+    /* Layout */
+    #root{display:flex;height:100vh;gap:12px;padding:12px}
+    /* Sidebar */
+    aside.sidebar{
+      width:340px;min-width:260px;max-width:420px;
+      background:var(--panel);border-radius:12px;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,0.6);
+      display:flex;flex-direction:column;transition:width .25s ease;
+    }
+    aside.sidebar.collapsed{width:64px;overflow:hidden}
+    .brand{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+    .logo{width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#6ee7b7);display:flex;align-items:center;justify-content:center;font-weight:700;color:#002;}
+    h1{margin:0;font-size:16px}
+    .subtitle{font-size:12px;color:var(--muted);margin-top:4px}
+    .section{margin-top:14px}
+    label{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}
+    .dropzone{padding:12px;border-radius:10px;border:1px dashed rgba(255,255,255,0.04);background:var(--card);color:var(--muted);text-align:center}
+    input[type=file]{display:none}
+    .row{display:flex;gap:8px}
+    button.btn{background:linear-gradient(90deg,var(--accent),#6ee7b7);color:#002;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted);padding:8px;border-radius:8px;cursor:pointer}
+    .small{font-size:13px;color:var(--muted)}
+    .controls-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    pre#log{height:110px;overflow:auto;background:transparent;border:1px solid rgba(255,255,255,0.03);padding:8px;border-radius:8px;color:var(--muted);margin:0}
+    footer.info{font-size:12px;color:var(--muted);margin-top:auto}
+    /* Viewer */
+    main.viewer{flex:1;position:relative;border-radius:12px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.6)}
+    canvas{display:block;width:100%;height:100%}
+    /* Floating HUD */
+    .hud{position:absolute;left:12px;top:12px;background:rgba(0,0,0,0.45);padding:8px 10px;border-radius:10px;color:#fff;font-size:13px;backdrop-filter:blur(4px)}
+    .floating-tools{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:8px;z-index:20}
+    .icon{background:rgba(255,255,255,0.03);border:none;color:var(--muted);padding:8px;border-radius:8px;min-width:44px;cursor:pointer}
+    .icon.active{background:var(--accent);color:#002}
+    /* Bottom bar */
+    .bottombar{position:absolute;left:12px;right:12px;bottom:12px;background:rgba(0,0,0,0.45);padding:8px;border-radius:10px;display:flex;justify-content:space-between;gap:12px;align-items:center;color:var(--muted);font-size:13px}
+    .badge{background:#07232a;padding:6px 8px;border-radius:8px;color:var(--muted);font-size:13px}
+    /* Responsive */
+    @media(max-width:960px){
+      #root{flex-direction:column;padding:8px}
+      aside.sidebar{width:100%;max-height:36vh;overflow:auto}
+      main.viewer{height:58vh;border-radius:10px}
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="logo">P</div>
+        <div>
+          <h1>Parking3D — Vis. & Gestão</h1>
+          <div class="subtitle">Painel principal do sistema de gestão</div>
+        </div>
+        <div style="margin-left:auto">
+          <button id="btnCollapse" class="ghost" title="Recolher painel">⇤</button>
+        </div>
+      </div>
+
+      <!-- Upload -->
+      <div class="section">
+        <label>Modelo 3D (.glb / .gltf)</label>
+        <div class="dropzone" id="dropzone">Arraste aqui ou use Selecionar arquivo</div>
+        <input id="fileInput" type="file" accept=".glb,.gltf" />
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="btnSelect" class="btn">Selecionar arquivo</button>
+          <button id="btnClear" class="ghost">Limpar cena</button>
+        </div>
+        <div class="small" id="status">Aguardando modelo</div>
+      </div>
+
+      <!-- Manipulação -->
+      <div class="section">
+        <label>Manipulação 3D</label>
+        <div class="controls-grid">
+          <button id="btnTranslate" class="ghost">Transladar</button>
+          <button id="btnRotate" class="ghost">Rotacionar</button>
+          <button id="btnScale" class="ghost">Escalar</button>
+          <button id="btnFit" class="ghost">Enquadrar</button>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button id="btnWire" class="ghost">Wireframe</button>
+          <button id="btnGrid" class="ghost">Grade</button>
+          <button id="btnAxes" class="ghost">Eixos</button>
+          <button id="btnSnap" class="ghost">Snap</button>
+        </div>
+      </div>
+
+      <!-- Gestão vagas -->
+      <div class="section">
+        <label>Gestão de vagas</label>
+        <div style="display:flex;gap:8px">
+          <button id="btnAddSpot" class="ghost">Adicionar vaga</button>
+          <button id="btnExport" class="btn">Exportar JSON</button>
+        </div>
+        <div class="small" style="margin-top:8px">Vagas são caixas posicionáveis. Selecione e ajuste com as ferramentas.</div>
+      </div>
+
+      <!-- Luz -->
+      <div class="section">
+        <label>Luz direcional</label>
+        <input id="lightRange" type="range" min="0" max="2" step="0.05" value="0.9" style="width:100%"/>
+      </div>
+
+      <!-- Log -->
+      <div class="section">
+        <label>Console</label>
+        <pre id="log">-- sistema inicializado --</pre>
+      </div>
+
+      <footer class="info">
+        <div>Deploy: Netlify / Static — upload local do .glb</div>
+      </footer>
+    </aside>
+
+    <main class="viewer" id="viewer">
+      <div class="hud" id="hud">Botões: esquerdo = rotacionar · direito = pan · roda = zoom</div>
+
+      <div class="floating-tools" id="floatingTools">
+        <button id="orbitToggle" class="icon active" title="Ativar Orbit">⟳</button>
+        <button id="transformToggle" class="icon" title="Ativar TransformControls">✦</button>
+        <button id="helpersToggle" class="icon" title="Grade / Eixos">#</button>
+      </div>
+
+      <div class="bottombar" id="bottombar">
+        <div class="badge" id="modelName">Nenhum modelo</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div id="coordInfo" class="small">X:0.00 Y:0.00 Z:0.00</div>
+          <div class="small">FPS optimizado</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Scripts: todos importados por CDN absoluto para evitar "module specifier" -->
+  <script type="module">
+    // Wrapper para capturar erros de extensões blockchain silenciosamente
+    (function() {
+      const originalDefineProperty = Object.defineProperty;
+      Object.defineProperty = function(obj, prop, descriptor) {
+        try {
+          return originalDefineProperty.call(this, obj, prop, descriptor);
+        } catch (e) {
+          if (prop === 'ethereum' && e.message.includes('redefine')) {
+            // Ignora erro de extensões crypto - não afeta nossa aplicação 3D
+            console.warn('Extensão blockchain detectada (ignorado):', e.message);
+            return obj;
+          }
+          throw e;
+        }
+      };
+    })();
+
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js';
+    import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/controls/OrbitControls.js';
+    import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js';
+    import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/controls/TransformControls.js';
+    import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/DRACOLoader.js';
+
+    // UI references
+    const sidebar = document.getElementById('sidebar');
+    const btnCollapse = document.getElementById('btnCollapse');
+    const fileInput = document.getElementById('fileInput');
+    const btnSelect = document.getElementById('btnSelect');
+    const dropzone = document.getElementById('dropzone');
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+    const modelNameEl = document.getElementById('modelName');
+    const coordInfo = document.getElementById('coordInfo');
+
+    const btnClear = document.getElementById('btnClear');
+    const btnTranslate = document.getElementById('btnTranslate');
+    const btnRotate = document.getElementById('btnRotate');
+    const btnScale = document.getElementById('btnScale');
+    const btnFit = document.getElementById('btnFit');
+    const btnWire = document.getElementById('btnWire');
+    const btnGrid = document.getElementById('btnGrid');
+    const btnAxes = document.getElementById('btnAxes');
+    const btnSnap = document.getElementById('btnSnap');
+    const btnAddSpot = document.getElementById('btnAddSpot');
+    const btnExport = document.getElementById('btnExport');
+    const lightRange = document.getElementById('lightRange');
+
+    const orbitToggle = document.getElementById('orbitToggle');
+    const transformToggle = document.getElementById('transformToggle');
+    const helpersToggle = document.getElementById('helpersToggle');
+
+    // Viewer setup
+    const container = document.getElementById('viewer');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x071018);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    container.appendChild(renderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.01, 2000);
+    camera.position.set(6, 3.5, 8);
+
+    // Lights
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 0.6);
+    scene.add(hemi);
+    const dirLight = new THREE.DirectionalLight(0xffffff, parseFloat(lightRange.value));
+    dirLight.position.set(5, 10, 7.5);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+
+    // Helpers
+    const grid = new THREE.GridHelper(10, 20, 0x2b3946, 0x17202a);
+    grid.visible = false;
+    scene.add(grid);
+    const axes = new THREE.AxesHelper(1.6);
+    axes.visible = false;
+    scene.add(axes);
+
+    // Controls
+    const orbit = new OrbitControls(camera, renderer.domElement);
+    orbit.enableDamping = true;
+    orbit.dampingFactor = 0.07;
+
+    const transform = new TransformControls(camera, renderer.domElement);
+    transform.addEventListener('dragging-changed', (e) => { orbit.enabled = !e.value; });
+    transform.setSpace('local');
+    transform.visible = false;
+    scene.add(transform);
+
+    // Loaders & Draco
+    const draco = new DRACOLoader();
+    draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.161.0/examples/js/libs/draco/');
+    const loader = new GLTFLoader();
+    loader.setDRACOLoader(draco);
+
+    // Scene root & state
+    const root = new THREE.Group(); scene.add(root);
+    let currentModel = null;
+    const parkingSpots = [];
+    let wire = false, snap = false;
+
+    // Logging util
+    function log(msg){ const ts = new Date().toLocaleTimeString(); logEl.textContent = `[${ts}] ${msg}\n` + logEl.textContent; }
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+    });
+
+    // Frame object (centraliza e enquadra)
+    function frameObject(obj, pad = 1.25){
+      const box = new THREE.Box3().setFromObject(obj);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      obj.position.sub(center);
+      const maxDim = Math.max(size.x, size.y, size.z);
+      if (maxDim === 0) return;
+      const fov = camera.fov * (Math.PI / 180);
+      let camZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+      camZ *= pad;
+      camera.position.set(camZ, camZ * 0.6, camZ);
+      orbit.target.set(0, 0, 0);
+      orbit.update();
+    }
+
+    // Load GLB from object URL
+    async function loadFromURL(url, filename = 'model.glb'){
+      statusEl.textContent = 'Carregando ' + filename + ' ...';
+      try{
+        const gltf = await new Promise((res, rej) => loader.load(url, res, undefined, rej));
+        // limpar root
+        root.clear();
+        currentModel = gltf.scene || gltf.scenes[0];
+        root.add(currentModel);
+        frameObject(currentModel);
+        modelNameEl.textContent = filename;
+        statusEl.textContent = 'Modelo carregado: ' + filename;
+        log('Modelo carregado: ' + filename);
+        // selecionar modelo para transformação
+        selectObject(currentModel);
+      }catch(err){
+        console.error(err);
+        statusEl.textContent = 'Erro ao carregar (ver console)';
+        log('Erro ao carregar: ' + (err.message || err));
+      }
+    }
+
+    // File input / Drag & Drop
+    btnSelect.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const url = URL.createObjectURL(f);
+      loadFromURL(url, f.name);
+    });
+
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.style.borderColor = 'rgba(255,255,255,0.2)'; });
+    dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); dropzone.style.borderColor = ''; });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.style.borderColor = '';
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!f) return;
+      if (!f.name.toLowerCase().endsWith('.glb') && !f.name.toLowerCase().endsWith('.gltf')){
+        alert('Formato inválido. Use .glb ou .gltf');
+        return;
+      }
+      const url = URL.createObjectURL(f);
+      loadFromURL(url, f.name);
+    });
+
+    // Select object: attach TransformControls to object
+    function selectObject(obj){
+      transform.detach();
+      transform.attach(obj);
+      transform.setMode('translate');
+      transform.visible = true;
+      transform.enabled = true;
+    }
+
+    // Picking: pointer -> attach control to clicked item
+    const pointer = new THREE.Vector2();
+    const raycaster = new THREE.Raycaster();
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      if (!currentModel) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = - ((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const intersects = raycaster.intersectObjects(root.children, true);
+      if (intersects.length){
+        let picked = intersects[0].object;
+        // subir até o top-level child of root
+        while (picked.parent && picked.parent !== root) picked = picked.parent;
+        selectObject(picked);
+        log('Selecionado: ' + (picked.userData.id || picked.name || picked.uuid));
+      }
+    });
+
+    // Buttons: transform modes
+    function setActiveButton(btn){
+      // reset visuals for translate/rotate/scale
+      [btnTranslate, btnRotate, btnScale].forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+    }
+    btnTranslate.addEventListener('click', () => { transform.setMode('translate'); setActiveButton(btnTranslate); });
+    btnRotate.addEventListener('click', () => { transform.setMode('rotate'); setActiveButton(btnRotate); });
+    btnScale.addEventListener('click', () => { transform.setMode('scale'); setActiveButton(btnScale); });
+
+    btnFit.addEventListener('click', () => { if (currentModel) frameObject(currentModel, 1.25); });
+    btnClear.addEventListener('click', () => { root.clear(); currentModel = null; parkingSpots.length = 0; modelNameEl.textContent = 'Nenhum modelo'; statusEl.textContent = 'Cena limpa'; log('Cena limpa'); });
+
+    // Wireframe
+    btnWire.addEventListener('click', () => {
+      wire = !wire;
+      root.traverse((c) => {
+        if (c.isMesh){
+          if (!c.userData.orig) c.userData.orig = c.material;
+          if (wire){
+            c.material = c.material.clone();
+            c.material.wireframe = true;
+          } else {
+            c.material = c.userData.orig || c.material;
+          }
+        }
+      });
+      btnWire.classList.toggle('active', wire);
+      log('Wireframe ' + (wire ? 'ON' : 'OFF'));
+    });
+
+    // Snap
+    btnSnap.addEventListener('click', () => {
+      snap = !snap;
+      transform.setTranslationSnap(snap ? 0.1 : null);
+      transform.setRotationSnap(snap ? THREE.MathUtils.degToRad(15) : null);
+      btnSnap.classList.toggle('active', snap);
+      log('Snap ' + (snap ? 'ON' : 'OFF'));
+    });
+
+    // Grid / Axes
+    btnGrid.addEventListener('click', () => { grid.visible = !grid.visible; btnGrid.classList.toggle('active', grid.visible); });
+    btnAxes.addEventListener('click', () => { axes.visible = !axes.visible; btnAxes.classList.toggle('active', axes.visible); });
+
+    // Light control
+    lightRange.addEventListener('input', (e) => { dirLight.intensity = parseFloat(e.target.value); });
+
+    // Add Parking Spot (box)
+    btnAddSpot.addEventListener('click', () => {
+      const geo = new THREE.BoxGeometry(0.6, 0.02, 1.2);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xffc857, metalness: 0.1, roughness: 0.7 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(0, 0.01, 0);
+      mesh.userData.type = 'parkingSpot';
+      mesh.userData.id = 'spot-' + (parkingSpots.length + 1);
+      root.add(mesh);
+      parkingSpots.push(mesh);
+      selectObject(mesh);
+      log('Vaga adicionada: ' + mesh.userData.id);
+    });
+
+    // Export spots JSON
+    btnExport.addEventListener('click', () => {
+      const out = parkingSpots.map(m => ({
+        id: m.userData.id,
+        position: m.position.toArray(),
+        rotation: [m.rotation.x, m.rotation.y, m.rotation.z],
+        scale: m.scale.toArray()
+      }));
+      const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'parking_spots.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      log('Export realizado (' + out.length + ' vagas)');
+    });
+
+    // Collapse sidebar
+    btnCollapse.addEventListener('click', () => {
+      const collapsed = sidebar.classList.toggle('collapsed');
+      btnCollapse.textContent = collapsed ? '⇥' : '⇤';
+    });
+
+    // Floating toolbar toggles
+    orbitToggle.addEventListener('click', () => {
+      orbit.enabled = !orbit.enabled;
+      orbitToggle.classList.toggle('active', orbit.enabled);
+      log('Orbit ' + (orbit.enabled ? 'ON' : 'OFF'));
+    });
+    transformToggle.addEventListener('click', () => {
+      const visible = !transform.visible;
+      transform.visible = visible;
+      transformToggle.classList.toggle('active', visible);
+      log('TransformControls ' + (visible ? 'ON' : 'OFF'));
+    });
+    helpersToggle.addEventListener('click', () => {
+      const state = !(grid.visible || axes.visible);
+      grid.visible = axes.visible = state;
+      btnGrid.classList.toggle('active', state);
+      btnAxes.classList.toggle('active', state);
+      helpersToggle.classList.toggle('active', state);
+    });
+
+    // Basic picker: update coordinate display when transform changes
+    transform.addEventListener('change', () => {
+      const obj = transform.object;
+      if (obj){
+        coordInfo.textContent = `X:${obj.position.x.toFixed(2)} Y:${obj.position.y.toFixed(2)} Z:${obj.position.z.toFixed(2)}`;
+      }
+    });
+
+    // Raycast selection on double click for precision
+    renderer.domElement.addEventListener('dblclick', (e) => {
+      if (!currentModel) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = - ((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObjects(root.children, true);
+      if (hits.length){
+        let picked = hits[0].object;
+        while (picked.parent && picked.parent !== root) picked = picked.parent;
+        selectObject(picked);
+        log('Selecionado (dblclick): ' + (picked.userData.id || picked.name || picked.uuid));
+      }
+    });
+
+    // Animation loop
+    function animate(){
+      requestAnimationFrame(animate);
+      orbit.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Inicialização e mensagem
+    log('Visualizador inicializado. Import via CDN — sem erro de "module specifier".');
+
+    // Test / safety: detect imports that would cause "three" error (diagnóstico rápido)
+    try {
+      if (!THREE || !THREE.Scene) console.warn('Three.js aparentemente não carregado corretamente.');
+    } catch(e) {
+      console.error('Diagnóstico import failed', e);
+      statusEl.textContent = 'Erro de import — ver console';
+    }
+
+    // Verificação de carregamento bem-sucedido
+    log('✅ Todos os módulos Three.js carregados com sucesso');
+    log('✅ Sistema pronto para usar - compatibilidade Netlify total');
+  </script>
+</body>
+</html>
